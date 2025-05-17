@@ -166,7 +166,7 @@ class FlashMLABackend(FlashInferMLAAttnBackend):
         else:
             cuda_graph_kv_indices = block_kv_indices
 
-        if self.num_draft_tokens:
+        if self.num_draft_tokens and block_kv_indices is None:
             self.cuda_graph_mla_metadata, self.cuda_graph_num_splits = get_mla_metadata(
                 torch.ones(
                     max_bs, dtype=torch.int32, device=cuda_graph_kv_indices.device
@@ -450,7 +450,6 @@ class FlashMLABackend(FlashInferMLAAttnBackend):
                 )
             return o.view(-1, layer.tp_q_head_num * layer.v_head_dim)
 
-
 # TODO: multi step kv indices optimization
 class FlashMLAMultiStepDraftBackend:
     """
@@ -472,6 +471,7 @@ class FlashMLAMultiStepDraftBackend:
             )
         self.topk = topk
         self.speculative_num_steps = speculative_num_steps
+        self.max_context_len = model_runner.model_config.context_len
         max_bs = model_runner.req_to_token_pool.size * self.topk
         self.kv_indptr = torch.zeros(
             (
@@ -512,7 +512,13 @@ class FlashMLAMultiStepDraftBackend:
 
     def init_cuda_graph_state(self, max_bs: int):
         for i in range(self.speculative_num_steps):
-            self.attn_backends[i].init_cuda_graph_state(max_bs, block_kv_indices=None)
+            cuda_graph_kv_indices = torch.full(
+                (max_bs, (self.max_context_len + PAGE_SIZE) // PAGE_SIZE),
+                1,
+                dtype=torch.int32,
+                device="cuda",
+            )
+            self.attn_backends[i].init_cuda_graph_state(max_bs, block_kv_indices=cuda_graph_kv_indices)
 
     def init_forward_metadata_capture_cuda_graph(self, forward_batch: ForwardBatch):
         def call_fn(i, forward_batch):
