@@ -146,6 +146,5 @@ class TestFlashMLAMTP(CustomTestCase):
         print(f"{avg_spec_accept_length=}")
         self.assertGreater(avg_spec_accept_length, 2.5)
 
-
 if __name__ == "__main__":
     unittest.main()
